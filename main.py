@@ -14,8 +14,12 @@ def rmse(y_true, y_pred):
 # Register the custom function
 tf.keras.utils.get_custom_objects().update({'rmse': rmse})
 
-# Load your custom model with the custom function
-model = load_model('animal_upd_250_cats_added_3.keras', custom_objects={'rmse': rmse})
+# Load your models
+models = {
+    'one': load_model('animal_upd_250_cats_added_3.keras', custom_objects={'rmse': rmse}),
+    'two': load_model('updated_vgg16.keras', custom_objects={'rmse': rmse}),
+    'three': load_model('animal_upd_250_cats_added_3.keras', custom_objects={'rmse': rmse})
+}
 
 # Define a function to preprocess the image as needed by your model
 def preprocess_image(img_path):
@@ -29,6 +33,8 @@ def preprocess_image(img_path):
 def predict():
     try:
         img_file = request.files['file']
+        model_choice = request.form.get('model', 'one')
+        model = models.get(model_choice, models['one'])
         img_path = os.path.join('uploads', img_file.filename)
         img_file.save(img_path)
         
@@ -36,7 +42,6 @@ def predict():
         
         preds = model.predict(img_array)
         # Assuming your model outputs probabilities for each class
-        # Modify this according to your model's output
         class_indices = ['bear', 'cat', 'crow', 'elephant', 'rat']  # List of class names
         top_preds = preds[0].argsort()[-5:][::-1]
         
