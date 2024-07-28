@@ -14,7 +14,7 @@ The application allows users to upload an image, predict the animal class, and v
 # Two pre-trained models are available for selection, you can get them on kaggle:
 ## Second is better but pre-selected is model one, to make more precise predictions use the second model
 
-## [Model One(old, vgg16 based](https://www.kaggle.com/models/vitaliyblackhole/classify-animals)
+## [Model One(old, vgg16 based)](https://www.kaggle.com/models/vitaliyblackhole/classify-animals)
 ## [Model Two(new, vgg16 based)](https://www.kaggle.com/models/vitaliyblackhole/updated-vgg16)
 
 # Second model accuracy, loss, rmse
