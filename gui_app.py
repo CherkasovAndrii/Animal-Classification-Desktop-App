@@ -3,10 +3,13 @@ from tkinter import filedialog, messagebox, Scrollbar, Frame, Menu, Canvas, Topl
 from PIL import Image, ImageTk
 import requests
 import os
+import torch
 import json
+import cv2  # OpenCV library
 
 # URL of the Flask server
 FLASK_URL = "http://127.0.0.1:5000/predict"
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 
 # List to store past predictions
 past_predictions = []
@@ -14,6 +17,29 @@ past_predictions = []
 # Settings
 app_resolution = (800, 600)
 selected_model = 'one'
+custom_model_path = None  # To store the uploaded model path
+
+def upload_model():
+    global custom_model_path, selected_model
+    file_path = filedialog.askopenfilename(filetypes=[("Model Files", "*.h5;*.keras")])
+    
+    if not file_path:
+        return  # User canceled the file dialog
+    
+    custom_model_path = file_path
+    messagebox.showinfo("Model Upload", f"Custom model uploaded: {os.path.basename(custom_model_path)}")
+    
+    # Send the uploaded model to the Flask server
+    with open(custom_model_path, 'rb') as model_file:
+        files = {'model': model_file}
+        response = requests.post('http://127.0.0.1:5000/upload_model', files=files)
+        
+    if response.status_code == 200:
+        # Update the selected_model to the newly uploaded model
+        selected_model = os.path.splitext(os.path.basename(custom_model_path))[0]
+        messagebox.showinfo("Success", f"Model uploaded and loaded on the server as '{selected_model}'.")
+    else:
+        messagebox.showerror("Error", "Failed to upload and load the model on the server.")
 
 # Function to save past predictions to a file
 def save_predictions():
@@ -26,6 +52,33 @@ def load_predictions():
     if os.path.exists('past_predictions.json'):
         with open('past_predictions.json', 'r') as f:
             past_predictions = json.load(f)
+
+# YOLO prediction function
+def make_prediction_with_yolo():
+    file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.jpg;*.jpeg;*.png")])
+    
+    if not file_path:
+        return  # User canceled the file dialog
+    
+    img = cv2.imread(file_path)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    # Perform inference
+    results = model(img_rgb)
+    
+    # Convert the result to a format suitable for display
+    img_result = results.render()[0]
+    img_result = cv2.cvtColor(img_result, cv2.COLOR_BGR2RGB)
+    img_pil = Image.fromarray(img_result)
+    img_tk = ImageTk.PhotoImage(img_pil)
+    
+    # Display the result in a new window
+    result_window = Toplevel(root)
+    result_window.title("YOLO Prediction Result")
+    
+    lbl_img = tk.Label(result_window, image=img_tk)
+    lbl_img.image = img_tk  # Keep a reference to avoid garbage collection
+    lbl_img.pack()
 
 # Function to upload and classify an image
 def upload_file():
@@ -42,13 +95,53 @@ def upload_file():
     # Prepare the image for sending to the server
     with open(file_path, 'rb') as img_file:
         files = {'file': img_file}
-        data = {'model': selected_model}
+        data = {'model': selected_model}  # Send the selected model choice
         response = requests.post(FLASK_URL, files=files, data=data)
 
     if response.status_code == 200:
         predictions = response.json()
         show_popup(predictions, selected_model)
         past_predictions.append({'file_path': file_path, 'predictions': predictions, 'model': selected_model})
+        save_predictions()
+    else:
+        messagebox.showerror("Error", "Failed to get prediction from the server.")
+
+
+# Function to capture and classify an image from the webcam
+def take_picture():
+    cap = cv2.VideoCapture(0)  # Open the webcam (0 is usually the built-in webcam)
+    if not cap.isOpened():
+        messagebox.showerror("Error", "Could not access the webcam.")
+        return
+
+    ret, frame = cap.read()
+    cap.release()  # Release the webcam
+
+    if not ret:
+        messagebox.showerror("Error", "Failed to capture image from the webcam.")
+        return
+
+    # Save the captured image to a temporary file
+    temp_image_path = "temp_webcam_image.jpg"
+    cv2.imwrite(temp_image_path, frame)
+
+    # Display the image on the GUI
+    img = Image.open(temp_image_path)
+    img = img.resize((300, 300))
+    img = ImageTk.PhotoImage(img)
+    panel.config(image=img)
+    panel.image = img
+
+    # Send the image to the Flask server for prediction
+    with open(temp_image_path, 'rb') as img_file:
+        files = {'file': img_file}
+        data = {'model': selected_model}  # Send the selected model choice
+        response = requests.post(FLASK_URL, files=files, data=data)
+
+    if response.status_code == 200:
+        predictions = response.json()
+        show_popup(predictions, selected_model)
+        past_predictions.append({'file_path': temp_image_path, 'predictions': predictions, 'model': selected_model})
         save_predictions()
     else:
         messagebox.showerror("Error", "Failed to get prediction from the server.")
@@ -148,6 +241,13 @@ def show_new_prediction():
     upload_button = tk.Button(prediction_frame, text="Upload Image", command=upload_file, width=20, height=2)
     upload_button.pack(pady=20)
 
+    take_picture_button = tk.Button(prediction_frame, text="Take Picture", command=take_picture, width=20, height=2)
+    take_picture_button.pack(pady=10)
+
+    # YOLO Button
+    yolo_button = tk.Button(prediction_frame, text="YOLO Prediction", command=make_prediction_with_yolo, width=20, height=2)
+    yolo_button.pack(pady=10)
+
     global panel
     panel = tk.Label(prediction_frame)
     panel.pack(pady=20)
@@ -163,6 +263,7 @@ def show_options_menu():
 
     model_label = tk.Label(options_window, text="Select Model:")
     model_label.pack(pady=5)
+
     model_var = tk.StringVar(value=selected_model)
     model_one = tk.Radiobutton(options_window, text="Model One", variable=model_var, value="one")
     model_one.pack(anchor='w')
@@ -170,6 +271,10 @@ def show_options_menu():
     model_two.pack(anchor='w')
     model_three = tk.Radiobutton(options_window, text="Model Three", variable=model_var, value="three")
     model_three.pack(anchor='w')
+
+    # Add button to upload custom model
+    upload_button = tk.Button(options_window, text="Upload Custom Model", command=upload_model)
+    upload_button.pack(pady=10)
 
     def save_options():
         global selected_model
@@ -179,8 +284,7 @@ def show_options_menu():
     save_button = tk.Button(options_window, text="Save", command=save_options, width=20, height=2)
     save_button.pack(pady=10)
 
-    quit_button = tk.Button(options_window, text="Quit", command=options_window.destroy, width=20, height=2)
-    quit_button.pack(pady=10)
+
 
 # Create the main application window
 root = tk.Tk()
